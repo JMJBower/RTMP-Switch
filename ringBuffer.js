@@ -25,7 +25,7 @@ class RingBuffer {
                 this.enq(toEnq[i]);
             }
         } else {
-            this.buffer.writeInt8(toEnq, this.p);
+            this.buffer.writeUInt8(toEnq, this.p);
             this.p = (this.p + 1) % this.size;
         }
     }
@@ -35,10 +35,11 @@ class RingBuffer {
      * @return {*} Returns the element if 1 or a buffer of 2 or more.
      */
     deq(len) {
+        if (this.p == this.front) return null;
         if (len > this.size) throw new Error("Length longer than buffer");
         if (len == 1 || !len) {
             if (this.front >= this.size) this.front = 0;
-            return this.buffer.readInt8(this.front++);
+            return this.buffer.readUInt8(this.front++);
         } else {
             const res = Buffer.alloc(len);
             for (let i = 0; i < len; i++) {
