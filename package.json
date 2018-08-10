@@ -4,5 +4,8 @@
   },
   "scripts": {
     "test": "mocha"
+  },
+  "dependencies": {
+    "amf-js": "^1.0.4"
   }
 }

@@ -1,5 +1,6 @@
 // RTMP Multiplexer
 const net = require("net");
+const AMF = require("amf-js");
 const RingBuffer = require("./ringBuffer.js");
 
 const PORT = 1935;
@@ -16,6 +17,28 @@ function randBytes() {
         numbers[i] = Math.floor(Math.random() * (255 + 1));
     }
     return Buffer.from(numbers);
+}
+
+/**
+ * Generates the header's and send the packet
+ * @param {Socket} socket
+ * @param {Buffer} body
+ * @param {Number} typeId
+ * @param {boolean} lowLevel
+ */
+function send(socket, body, typeId, lowLevel) {
+    const packet = Buffer.alloc(body.length + 12);
+    packet.writeUInt8(lowLevel ? 0x02 : 0x03, 0);
+    packet.writeUIntBE(0x00, 1, 3);
+    packet.writeUIntBE(body.length, 2, 3);
+    packet.writeUInt8(typeId, 7);
+    packet.writeUIntLE(0, 8, 4);
+
+    for (let i = 0; i < body.length; i++) {
+        packet.writeUInt8(body[i], i + 12);
+    }
+    console.log(packet);
+    //socket.write(packet);
 }
 
 /**
@@ -57,6 +80,8 @@ const server = net.createServer((socket) => {
     socket.currPacket = null;
     socket.currPointer = null;
 
+    socket.chunkSize = 128; // Default Chunk size
+
     // Data on the socket to be proccessed
     socket.toProccess = new EventRingBuffer();
     socket.toProccess.bind(() => {
@@ -90,8 +115,6 @@ const server = net.createServer((socket) => {
                     socket.currPacket.writeUInt8(elm, socket.currPointer++);
                     if (socket.currPointer == 1536) {
                         // We have the complete handshake packet
-                        console.log(socket.currPacket.toString("hex"));
-                        console.log(socket.s1.toString("hex"));
                         if (!socket.currPacket.equals(socket.s1)) throw new Error("S1 doesn't match");
                         socket.currPacket = null;
                         socket.write(socket.c1);
@@ -145,7 +168,72 @@ const server = net.createServer((socket) => {
                 socket.currPacket.buffer.writeUInt8(elm, socket.currPointer++);
                 if (socket.currPointer == socket.currPacket.buffer.length) {
                     // Header complete
+                    socket.handshake = 4;
+                    socket.currPacket.buffer =
+                        Buffer.alloc(socket.currPacket.header.packetLength);
+                    socket.currPointer = 0;
+                }
+            } else if (socket.handshake == 4) {
+                socket.currPacket.buffer.writeUInt8(elm, socket.currPointer++);
+                let reply = null;
+                if (socket.currPointer == socket.currPacket.buffer.length) {
+                    console.log("Body Done");
+                    // Body complete
+                    switch (socket.currPacket.header.messageTypeId) {
+                        case 0x01:
+                            // Set Chunk Size
+                            socket.chunkSize =
+                                socket.currPacket.buffer.readUInt32BE(0);
+                            console.log("New chunk size", socket.chunkSize);
+                            break;
+                        case 0x04:
+                            // Ping Message
+                            break;
+                        case 0x05:
+                            // Server Bandwidth
+                            break;
+                        case 0x06:
+                            // Client Bandwidth
+                            break;
+                        case 0x08:
+                            // Audio Packet
+                            break;
+                        case 0x09:
+                            // Video Packet
+                            break;
+                        case 0x11:
+                            // AMF3
+                            break;
+                        case 0x12:
+                            // Invoke
+                            break;
+                        case 0x14:
+                            // AMF0
+                            console.log(socket.currPacket.buffer);
+                            let buf = AMF.makeArrayBuffer(socket.currPacket.buffer.toString("hex"));
+                            console.log(AMF.deserialize(buf));
+                            //if (decoder == "connect") {
+                                // Send Client Bandwidth
+                                reply = Buffer.alloc(4);
+                                reply.writeInt32BE(5000, 0);
+                                send(socket, reply, 0x06, true);
+                                // Send Server Bandwidth
+                                send(socket, reply, 0x05, true);
+                                // Send Invoke
+                                
+                                //reply = amf.write("_result");
+                                send(socket, reply, 0x14, false);
+                            //}
+                            break;
+                        default:
+                            throw new Error("Invalid Message Type ID");
+                    }
+
                     console.log(socket.currPacket);
+                    // End of Packet, setup for a new packet
+                    socket.handshake = 3;
+                    socket.currPacket = null;
+                    socket.currPointer = 0;
                 }
             }
         }
